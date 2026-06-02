@@ -724,6 +724,10 @@ geotab.addin.samlBulkEditor = function () {
       const r = virtualRows.find((x) => x.id === id);
       if (!r || r.authType !== 'SAML') return;
     }
+    // Already editing this exact cell — bail. Re-rendering would replace
+    // the live <select> node mid-click and slam the native dropdown popup
+    // shut as soon as the user opened it.
+    if (ui.activeEdit && ui.activeEdit.id === id && ui.activeEdit.field === field) return;
     if (ui.activeEdit && (ui.activeEdit.id !== id || ui.activeEdit.field !== field)) {
       const prev = document.querySelector('.sbe-cell-editing .sbe-cell-input');
       if (prev) commitCellEdit(ui.activeEdit.id, ui.activeEdit.field, prev.value, 0);
