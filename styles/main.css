@@ -182,6 +182,9 @@
 .btn--danger  { background: var(--c-error-bg); color: var(--c-error); border-color: var(--c-error); }
 .btn--danger:hover:not(:disabled) { background: var(--c-error); color: #fff; }
 .btn--sm      { padding: 4px 8px; font-size: var(--fs-sm); }
+/* Same display-vs-[hidden] trap as .sbe-save-pill — .btn's inline-flex
+   would otherwise keep a `hidden` button visible. */
+.btn[hidden]  { display: none; }
 
 /* ───────── Summary tiles ─────────────────────────────────────────────── */
 .sbe-tiles {
@@ -318,6 +321,11 @@ button.sbe-tile[aria-pressed="true"] .sbe-tile__label { color: var(--c-accent-dk
   border-radius: var(--r-md);
   box-shadow: var(--shadow-2);
 }
+/* The explicit `display: flex` above overrides the UA-stylesheet's
+   `[hidden] { display: none }`, so the JS `el.hidden = true` toggle had
+   no visible effect. Higher-specificity rule restores correct behavior.
+   Same fix below for .sbe-save-pill. */
+.sbe-action-bar[hidden] { display: none; }
 .sbe-action-bar__count strong { font-size: var(--fs-lg); }
 
 /* ───────── Save pill (floating top-right) ────────────────────────────── */
@@ -331,6 +339,7 @@ button.sbe-tile[aria-pressed="true"] .sbe-tile__label { color: var(--c-accent-dk
   box-shadow: var(--shadow-2);
   z-index: 100;
 }
+.sbe-save-pill[hidden] { display: none; }
 
 /* ───────── Modal ─────────────────────────────────────────────────────── */
 .addin-modal {
@@ -384,6 +393,7 @@ button.sbe-tile[aria-pressed="true"] .sbe-tile__label { color: var(--c-accent-dk
   padding: var(--sp-2) var(--sp-3);
   display: flex; flex-direction: column; gap: var(--sp-2);
 }
+.sbe-pw-block[hidden] { display: none; }
 .sbe-pw-row {
   display: flex; gap: var(--sp-2); align-items: stretch;
 }
