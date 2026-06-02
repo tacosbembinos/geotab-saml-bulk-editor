@@ -99,7 +99,14 @@ geotab.addin.samlBulkEditor = function () {
     sortDir: 'asc',
     activeEdit: null,          // { id, field } currently editing inline, or null
     suppressBlurCommit: false, // set briefly when Esc cancels
-    lastFocusEl: null          // focus restore on modal close
+    lastFocusEl: null,         // focus restore on modal close
+    // Quick filter mode, layered on top of the toolbar's search/auth/cert
+    // filters. Lets the user one-click "show me what the pill is counting"
+    // (or the action bar) when the regular filters have hidden those rows.
+    //   '' = no quick filter
+    //   'pending'  = only rows in ui.edited
+    //   'selected' = only rows in ui.selected
+    quickFilter: ''
   };
 
   // Cancellation: blur bumps ui.opGen + aborts every handle. apiCall rejects
@@ -490,6 +497,8 @@ geotab.addin.samlBulkEditor = function () {
     else if (fCert)           arr = arr.filter((r) => r.certId === fCert);
     if (q) arr = arr.filter((r) =>
       [r.name, r.firstName, r.lastName].some((v) => String(v).toLowerCase().indexOf(q) !== -1));
+    if (ui.quickFilter === 'pending')  arr = arr.filter((r) => ui.edited.has(r.id));
+    if (ui.quickFilter === 'selected') arr = arr.filter((r) => ui.selected.has(r.id));
     const dir = ui.sortDir === 'asc' ? 1 : -1;
     const k = ui.sortKey;
     arr.sort((a, b) => {
@@ -605,6 +614,20 @@ geotab.addin.samlBulkEditor = function () {
     if (ui.selected.size === 0) { bar.hidden = true; return; }
     bar.hidden = false;
     $('sbe-sel-count').textContent = String(ui.selected.size);
+    // Of the currently-selected IDs, how many are not in the visible
+    // (post-filter) table? Reveals state hidden by search / auth / cert /
+    // active-only / quick filters so the user isn't surprised that the
+    // count is bigger than what they can see.
+    const visibleIds = new Set(virtualRows.map((r) => r.id));
+    let hidden = 0;
+    ui.selected.forEach((id) => { if (!visibleIds.has(id)) hidden++; });
+    const note = $('sbe-sel-hidden-note');
+    const review = $('sbe-sel-review');
+    if (note) {
+      note.hidden = hidden === 0;
+      if (hidden > 0) note.textContent = ' (' + hidden + ' off-screen)';
+    }
+    if (review) review.hidden = hidden === 0;
   }
   function renderSavePill() {
     const pill = $('sbe-save-pill');
@@ -616,6 +639,30 @@ geotab.addin.samlBulkEditor = function () {
     // into multiple child nodes makes .btn's inline-flex gap visible.
     const label = $('sbe-save-edits-label');
     if (label) label.textContent = 'Commit ' + n + ' edit' + (n === 1 ? '' : 's');
+    // Mirror the action-bar's hidden-count: tells the user when staged
+    // edits live on rows the current filter is hiding (the v1.0.1 → 1.0.2
+    // confusion: "I haven't selected anything, why does it say 8 edits?").
+    const visibleIds = new Set(virtualRows.map((r) => r.id));
+    let hidden = 0;
+    ui.edited.forEach((_, id) => { if (!visibleIds.has(id)) hidden++; });
+    const note = $('sbe-save-hidden-note');
+    const review = $('sbe-review-pending');
+    if (note) {
+      note.hidden = hidden === 0;
+      if (hidden > 0) note.textContent = '(' + hidden + ' off-screen)';
+    }
+    if (review) review.hidden = hidden === 0;
+  }
+  // Quick-filter toggle. mode is 'pending' or 'selected'. Toggling the
+  // active mode clears it. Also drives the toggleable summary tiles'
+  // aria-pressed so the user can see at a glance which filter is on.
+  function setQuickFilter(mode) {
+    ui.quickFilter = (ui.quickFilter === mode) ? '' : mode;
+    const pendBtn = $('sbe-tile-pending-btn');
+    const selBtn  = $('sbe-tile-selected-btn');
+    if (pendBtn) pendBtn.setAttribute('aria-pressed', ui.quickFilter === 'pending'  ? 'true' : 'false');
+    if (selBtn)  selBtn.setAttribute('aria-pressed', ui.quickFilter === 'selected' ? 'true' : 'false');
+    render();
   }
   function populateCertFilter() {
     const sel = $('sbe-filter-cert');
@@ -1217,6 +1264,21 @@ geotab.addin.samlBulkEditor = function () {
       render();
     });
     $('sbe-sel-clear').addEventListener('click', () => { ui.selected.clear(); render(); });
+    // Tile / pill / action-bar quick-filter shortcuts. Toggles the matching
+    // filter so the user can immediately see which rows the count refers
+    // to. Tiles toggle their own mode; the pill / action-bar review
+    // buttons always activate (clear-then-set) to avoid a confusing
+    // "click Review and nothing changes because it was already on".
+    const pendBtn = $('sbe-tile-pending-btn');
+    if (pendBtn) pendBtn.addEventListener('click', () => setQuickFilter('pending'));
+    const selBtn = $('sbe-tile-selected-btn');
+    if (selBtn) selBtn.addEventListener('click', () => setQuickFilter('selected'));
+    $('sbe-review-pending').addEventListener('click', () => {
+      ui.quickFilter = ''; setQuickFilter('pending');
+    });
+    $('sbe-sel-review').addEventListener('click', () => {
+      ui.quickFilter = ''; setQuickFilter('selected');
+    });
     $('sbe-bulk-saml').addEventListener('click', openBulkSaml);
     $('sbe-bulk-basic').addEventListener('click', openBulkBasic);
     $('sbe-save-edits').addEventListener('click', saveEdits);

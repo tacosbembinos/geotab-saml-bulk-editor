@@ -23,7 +23,7 @@
        bump the tag in BOTH asset URLs below AND config.json#version, commit,
        then `git tag vX.Y.Z && git push --tags`. The ?v= is a defence-in-depth
        browser-cache buster; the immutable tag is what makes the CDN safe. -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.1/styles/main.css?v=1.0.1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.2/styles/main.css?v=1.0.2">
 </head>
 <body>
 
@@ -83,12 +83,21 @@
     </section>
 
     <!-- ─────────────── Summary tiles ───────────────────────────────────── -->
+    <!-- Selected and Pending tiles are <button>s so a click toggles the
+         corresponding filter — gives the user a one-click "show me what
+         these counts refer to" without scrolling / un-filtering manually. -->
     <section class="sbe-tiles" aria-label="Summary">
       <div class="sbe-tile"><span class="sbe-tile__label">Loaded</span><span class="sbe-tile__value" id="sbe-tile-loaded">0</span></div>
       <div class="sbe-tile"><span class="sbe-tile__label">SAML</span><span class="sbe-tile__value" id="sbe-tile-saml">0</span></div>
       <div class="sbe-tile"><span class="sbe-tile__label">Basic</span><span class="sbe-tile__value" id="sbe-tile-basic">0</span></div>
-      <div class="sbe-tile"><span class="sbe-tile__label">Selected</span><span class="sbe-tile__value" id="sbe-tile-selected">0</span></div>
-      <div class="sbe-tile"><span class="sbe-tile__label">Pending edits</span><span class="sbe-tile__value" id="sbe-tile-pending">0</span></div>
+      <button type="button" class="sbe-tile sbe-tile--toggle" id="sbe-tile-selected-btn" aria-pressed="false" title="Click to show only selected rows">
+        <span class="sbe-tile__label">Selected</span>
+        <span class="sbe-tile__value" id="sbe-tile-selected">0</span>
+      </button>
+      <button type="button" class="sbe-tile sbe-tile--toggle" id="sbe-tile-pending-btn" aria-pressed="false" title="Click to show only rows with staged edits">
+        <span class="sbe-tile__label">Pending edits</span>
+        <span class="sbe-tile__value" id="sbe-tile-pending">0</span>
+      </button>
       <div class="sbe-tile"><span class="sbe-tile__label">Certificates</span><span class="sbe-tile__value" id="sbe-tile-certs">0</span></div>
     </section>
 
@@ -118,8 +127,9 @@
   <!-- ─────────────── Selection action bar ───────────────────────────────── -->
   <div class="sbe-action-bar" id="sbe-action-bar" hidden role="region" aria-label="Selected rows actions">
     <span class="sbe-action-bar__count" aria-live="polite">
-      <strong id="sbe-sel-count">0</strong> selected
+      <strong id="sbe-sel-count">0</strong> selected<span id="sbe-sel-hidden-note" class="sbe-hidden-note" hidden></span>
     </span>
+    <button type="button" class="btn btn--ghost btn--sm" id="sbe-sel-review" hidden>Review selected</button>
     <button type="button" class="btn btn--ghost btn--sm" id="sbe-sel-clear">Clear</button>
     <span class="addin-spacer"></span>
     <button type="button" class="btn btn--sm" id="sbe-bulk-saml">Set SAML…</button>
@@ -136,6 +146,8 @@
     <button type="button" class="btn btn--primary" id="sbe-save-edits">
       <span id="sbe-save-edits-label">Commit edits</span>
     </button>
+    <span id="sbe-save-hidden-note" class="sbe-hidden-note" hidden></span>
+    <button type="button" class="btn btn--ghost btn--sm" id="sbe-review-pending" hidden>Review</button>
     <button type="button" class="btn btn--ghost btn--sm" id="sbe-discard-edits">Discard</button>
   </div>
 
@@ -160,7 +172,7 @@
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.1/scripts/main.js?v=1.0.1"></script>
+<script src="https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.2/scripts/main.js?v=1.0.2"></script>
 
 </body>
 </html>

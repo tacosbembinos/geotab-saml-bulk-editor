@@ -199,6 +199,27 @@
 .sbe-tile__label { font-size: var(--fs-xs); color: var(--c-text-muted); text-transform: uppercase; letter-spacing: .04em; }
 .sbe-tile__value { font-size: var(--fs-xl); font-weight: 600; color: var(--c-text); }
 
+/* Toggleable tile: looks like a tile, behaves like a button. aria-pressed
+   styles the active state so the user can see which filter is on. */
+button.sbe-tile {
+  font: inherit; text-align: left; cursor: pointer;
+}
+button.sbe-tile:hover:not([aria-pressed="true"]) { background: var(--c-bg-1); }
+button.sbe-tile:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+button.sbe-tile[aria-pressed="true"] {
+  border-color: var(--c-accent);
+  background: var(--c-accent-lt);
+}
+button.sbe-tile[aria-pressed="true"] .sbe-tile__value,
+button.sbe-tile[aria-pressed="true"] .sbe-tile__label { color: var(--c-accent-dk); }
+
+.sbe-hidden-note {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+  color: var(--c-warn);
+  font-weight: 500;
+}
+
 /* ───────── Table ─────────────────────────────────────────────────────── */
 .addin-table-wrap {
   flex: 1; min-height: 220px;
