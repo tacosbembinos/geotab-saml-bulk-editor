@@ -1,0 +1,16 @@
+{
+  "name": "SAML Bulk Editor",
+  "supportEmail": "abembridge@advtracking.net",
+  "version": "1.0.0",
+  "items": [
+    {
+      "url": "https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.0/samlBulkEditor.html",
+      "path": "AdministrationLink/",
+      "menuName": { "en": "SAML Bulk Editor" },
+      "icon": "https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.0/images/icon.svg",
+      "menuHeader": false,
+      "securityIds": ["ManageUsers"]
+    }
+  ],
+  "isSigned": false
+}

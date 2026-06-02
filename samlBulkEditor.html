@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' https://cdn.jsdelivr.net;
+                 script-src 'self' https://cdn.jsdelivr.net;
+                 style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+                 img-src 'self' data: blob: https:;
+                 connect-src 'self' https:;
+                 font-src 'self' data:;
+                 frame-ancestors 'self' https://*.geotab.com https://my.geotab.com;
+                 base-uri 'self';
+                 object-src 'none';
+                 form-action 'self';">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+
+  <title>SAML Bulk Editor</title>
+  <!-- Assets pinned to an immutable git tag on jsDelivr (NOT @main) so the
+       edge cache cannot serve stale post-merge content. To cut a release:
+       bump the tag in BOTH asset URLs below AND config.json#version, commit,
+       then `git tag vX.Y.Z && git push --tags`. The ?v= is a defence-in-depth
+       browser-cache buster; the immutable tag is what makes the CDN safe. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.0/styles/main.css?v=1.0.0">
+</head>
+<body>
+
+<div class="addin-root" id="saml-bulk-editor-root">
+
+  <a class="sbe-skip-link" href="#sbe-table">Skip to users table</a>
+
+  <header class="addin-header">
+    <div class="addin-header__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/>
+        <path d="M9 12l2 2 4-4"/>
+      </svg>
+    </div>
+    <div class="addin-header__titleblock">
+      <div class="addin-header__title geotabPageName">SAML Bulk Editor</div>
+      <div class="addin-header__subtitle">View users, switch authentication type, assign SAML certificates in bulk</div>
+    </div>
+    <span class="addin-header__spacer"></span>
+    <span class="addin-status" id="sbe-status" role="status" aria-live="polite">Idle.</span>
+  </header>
+
+  <div class="addin-body">
+
+    <!-- ─────────────── Toolbar ─────────────────────────────────────────── -->
+    <section class="sbe-toolbar" aria-label="Toolbar">
+      <div class="sbe-toolbar__filters">
+        <label class="addin-field">
+          <span>Search</span>
+          <input type="text" id="sbe-search" placeholder="name, first/last, email…">
+        </label>
+        <label class="addin-field">
+          <span>Auth type</span>
+          <select id="sbe-filter-auth">
+            <option value="">All</option>
+            <option value="BasicAuthentication">BasicAuthentication</option>
+            <option value="SAML">SAML</option>
+          </select>
+        </label>
+        <label class="addin-field">
+          <span>Certificate</span>
+          <select id="sbe-filter-cert">
+            <option value="">All certificates</option>
+            <option value="__none__">(none assigned)</option>
+          </select>
+        </label>
+        <label class="addin-field addin-field--inline">
+          <input type="checkbox" id="sbe-filter-active" checked>
+          <span>Active users only</span>
+        </label>
+      </div>
+      <div class="sbe-toolbar__actions">
+        <button type="button" class="btn btn--ghost" id="sbe-export">Export CSV</button>
+        <button type="button" class="btn btn--ghost" id="sbe-refresh">Refresh</button>
+        <button type="button" class="btn btn--primary" id="sbe-load">Load users</button>
+      </div>
+    </section>
+
+    <!-- ─────────────── Summary tiles ───────────────────────────────────── -->
+    <section class="sbe-tiles" aria-label="Summary">
+      <div class="sbe-tile"><span class="sbe-tile__label">Loaded</span><span class="sbe-tile__value" id="sbe-tile-loaded">0</span></div>
+      <div class="sbe-tile"><span class="sbe-tile__label">SAML</span><span class="sbe-tile__value" id="sbe-tile-saml">0</span></div>
+      <div class="sbe-tile"><span class="sbe-tile__label">Basic</span><span class="sbe-tile__value" id="sbe-tile-basic">0</span></div>
+      <div class="sbe-tile"><span class="sbe-tile__label">Selected</span><span class="sbe-tile__value" id="sbe-tile-selected">0</span></div>
+      <div class="sbe-tile"><span class="sbe-tile__label">Pending edits</span><span class="sbe-tile__value" id="sbe-tile-pending">0</span></div>
+      <div class="sbe-tile"><span class="sbe-tile__label">Certificates</span><span class="sbe-tile__value" id="sbe-tile-certs">0</span></div>
+    </section>
+
+    <!-- ─────────────── Users table ─────────────────────────────────────── -->
+    <div class="addin-table-wrap">
+      <table class="addin-table" id="sbe-table">
+        <thead>
+          <tr>
+            <th class="addin-col-check" scope="col"><input type="checkbox" id="sbe-check-all" aria-label="Select all rows"></th>
+            <th data-sort="name"       scope="col" tabindex="0" aria-sort="ascending">Username / Email</th>
+            <th data-sort="firstName"  scope="col" tabindex="0" aria-sort="none">First</th>
+            <th data-sort="lastName"   scope="col" tabindex="0" aria-sort="none">Last</th>
+            <th data-sort="authType"   scope="col" tabindex="0" aria-sort="none">Auth type</th>
+            <th data-sort="certName"   scope="col" tabindex="0" aria-sort="none">SAML certificate</th>
+            <th data-sort="lastAccess" scope="col" tabindex="0" aria-sort="none">Last access</th>
+            <th data-sort="active"     scope="col" tabindex="0" aria-sort="none">Active</th>
+            <th scope="col" class="addin-col-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="sbe-tbody">
+          <tr><td colspan="9" class="addin-empty">No users loaded. Click <strong>Load users</strong>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ─────────────── Selection action bar ───────────────────────────────── -->
+  <div class="sbe-action-bar" id="sbe-action-bar" hidden role="region" aria-label="Selected rows actions">
+    <span class="sbe-action-bar__count" aria-live="polite">
+      <strong id="sbe-sel-count">0</strong> selected
+    </span>
+    <button type="button" class="btn btn--ghost btn--sm" id="sbe-sel-clear">Clear</button>
+    <span class="addin-spacer"></span>
+    <button type="button" class="btn btn--sm" id="sbe-bulk-saml">Set SAML…</button>
+    <button type="button" class="btn btn--sm" id="sbe-bulk-basic">Revert to Basic…</button>
+    <button type="button" class="btn btn--sm" id="sbe-export-selected">Export selected</button>
+  </div>
+
+  <!-- ─────────────── Save pill ──────────────────────────────────────────── -->
+  <div class="sbe-save-pill" id="sbe-save-pill" hidden role="region" aria-label="Pending edits">
+    <button type="button" class="btn btn--primary" id="sbe-save-edits">
+      Commit <strong id="sbe-save-count">0</strong> edit<span id="sbe-save-plural">s</span>
+    </button>
+    <button type="button" class="btn btn--ghost btn--sm" id="sbe-discard-edits">Discard</button>
+  </div>
+
+  <!-- ─────────────── Modal shell (bulk-edit / destructive confirm) ──────── -->
+  <div class="addin-modal" id="sbe-modal" hidden inert aria-hidden="true">
+    <div class="addin-modal__backdrop" data-modal-close></div>
+    <div class="addin-modal__panel" role="dialog" aria-modal="true" aria-labelledby="sbe-modal-title">
+      <header class="addin-modal__header">
+        <h2 id="sbe-modal-title">Edit</h2>
+        <button class="addin-modal__close" data-modal-close aria-label="Close">×</button>
+      </header>
+      <div class="addin-modal__body" id="sbe-modal-body"></div>
+      <footer class="addin-modal__footer">
+        <button class="btn" data-modal-close>Cancel</button>
+        <button class="btn btn--primary" id="sbe-modal-save">Apply</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ─────────────── Toast host ─────────────────────────────────────────── -->
+  <div class="sbe-toast-host" id="sbe-toast-host" aria-live="polite" aria-atomic="false"></div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/gh/tacosbembinos/geotab-saml-bulk-editor@v1.0.0/scripts/main.js?v=1.0.0"></script>
+
+</body>
+</html>

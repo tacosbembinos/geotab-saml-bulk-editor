@@ -1,0 +1,12 @@
+# Reference / scaffolding docs from sibling projects — not part of this addin
+BUILDING_A_GENERIC_ADDIN.md
+BUILD_GUIDE_esri-map-browser-addin.md
+BUILD_GUIDE_geotab-fuel-transactions-bulk-editor.md
+PRODUCT_OVERVIEW.md
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
