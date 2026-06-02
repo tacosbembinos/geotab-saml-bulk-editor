@@ -56,6 +56,33 @@ geotab.addin.samlBulkEditor = function () {
 
   const AUTH_TYPES = Object.freeze(['BasicAuthentication', 'SAML']);
 
+  // The User entity returned by Get does NOT include the password (server
+  // never serialises it). When switching a user back to BasicAuthentication
+  // via Set, the server requires entity.password to be non-null or it
+  // rejects with `ArgumentNullException: Value cannot be null. (Parameter
+  // 'Password')`. We capture a temporary password in the bulk / row modals
+  // (and stash it on the patch as __password) and apply it during commit.
+  // It never goes over the wire except as part of the legitimate Set call.
+  function generateTempPassword() {
+    // 16 chars, mixed-case + digits + symbol. Avoids visually-ambiguous
+    // glyphs (0/O, 1/l/I) so an admin who reads it aloud doesn't fumble.
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghijkmnopqrstuvwxyz';
+    const digit = '23456789';
+    const sym   = '!@#$%&*?';
+    const all = upper + lower + digit + sym;
+    const rnd = (set) => set[Math.floor(Math.random() * set.length)];
+    let pw = rnd(upper) + rnd(lower) + rnd(digit) + rnd(sym);
+    for (let i = pw.length; i < 16; i++) pw += rnd(all);
+    // Fisher–Yates shuffle so the guaranteed-class chars aren't always at the front.
+    const arr = pw.split('');
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr.join('');
+  }
+
   // ── State ──────────────────────────────────────────────────────────────
   let api = null;
   let state = null;
@@ -585,8 +612,10 @@ geotab.addin.samlBulkEditor = function () {
     const n = ui.edited.size;
     if (n === 0) { pill.hidden = true; return; }
     pill.hidden = false;
-    $('sbe-save-count').textContent = String(n);
-    $('sbe-save-plural').textContent = n === 1 ? '' : 's';
+    // Single textContent — see HTML comment on #sbe-save-edits. Splitting
+    // into multiple child nodes makes .btn's inline-flex gap visible.
+    const label = $('sbe-save-edits-label');
+    if (label) label.textContent = 'Commit ' + n + ' edit' + (n === 1 ? '' : 's');
   }
   function populateCertFilter() {
     const sel = $('sbe-filter-cert');
@@ -676,11 +705,27 @@ geotab.addin.samlBulkEditor = function () {
     const origCertId = u.issuerCertificate && u.issuerCertificate.id;
     if (field === 'authType') {
       if (AUTH_TYPES.indexOf(raw) === -1) raw = origAuth;
+      // SAML→Basic via the inline editor would need a temp password (the
+      // User entity Get returns has no password; Set without one fails with
+      // ArgumentNullException). Route this transition through the row Edit
+      // modal where we can collect it.
+      if (raw === 'BasicAuthentication' && origAuth === 'SAML' && !patch.__password) {
+        showToast({
+          kind: 'error',
+          message: 'Reverting to Basic needs a temp password — use the Edit… button or the bulk Revert to Basic action.'
+        });
+        ui.activeEdit = null;
+        render();
+        return;
+      }
       if (raw === origAuth) {
         delete patch.userAuthenticationType;
         // Reverting to original auth type also drops a staged cert change
-        // if it became meaningless.
-        if (raw === 'BasicAuthentication') delete patch.issuerCertificate;
+        // and any captured temp password if they became meaningless.
+        if (raw === 'BasicAuthentication') {
+          delete patch.issuerCertificate;
+          delete patch.__password;
+        }
       } else {
         patch.userAuthenticationType = raw;
         if (raw === 'BasicAuthentication') {
@@ -691,6 +736,8 @@ geotab.addin.samlBulkEditor = function () {
           // the user to pick one — empty cert + SAML is invalid.
           showToast({ kind: 'error', message: 'Pick a certificate for this user.' });
         }
+        // Basic→SAML drops a previously-captured temp password (no longer relevant).
+        if (raw === 'SAML') delete patch.__password;
       }
     } else if (field === 'certId') {
       const newId = raw || null;
@@ -745,8 +792,16 @@ geotab.addin.samlBulkEditor = function () {
     modal.setAttribute('aria-hidden', 'false');
     const saveBtn = $('sbe-modal-save');
     const handler = () => {
-      try { onApply && onApply(); }
-      finally { closeModal(); saveBtn.removeEventListener('click', handler); }
+      // onApply may return `false` to keep the modal open (e.g. validation
+      // failed). Any other return value (including undefined) closes it.
+      let keepOpen = false;
+      try { keepOpen = onApply && onApply() === false; }
+      finally {
+        if (!keepOpen) {
+          closeModal();
+          saveBtn.removeEventListener('click', handler);
+        }
+      }
     };
     saveBtn.addEventListener('click', handler);
     const firstFocus = modal.querySelector('input, select, button');
@@ -802,11 +857,38 @@ geotab.addin.samlBulkEditor = function () {
     });
   }
   function openBulkBasic() {
+    // Count how many selected users are actually transitioning SAML→Basic.
+    // Only those need a temp password; users already on Basic do not.
+    let needPw = 0;
+    ui.selected.forEach((id) => {
+      const u = ui.users.find((x) => x.id === id);
+      if (u && (u.userAuthenticationType || 'BasicAuthentication') === 'SAML') needPw++;
+    });
+    const pwId = 'sbe-bulk-basic-pw';
+    const initialPw = needPw > 0 ? generateTempPassword() : '';
     const body =
       '<p>Revert <strong>' + ui.selected.size + '</strong> selected user' +
       (ui.selected.size === 1 ? '' : 's') + ' to <strong>BasicAuthentication</strong> and clear their SAML certificate.</p>' +
+      (needPw > 0
+        ? '<div class="sbe-pw-block">' +
+            '<label class="addin-field"><span>Temporary password (applied to ' + needPw +
+              ' SAML→Basic user' + (needPw === 1 ? '' : 's') + ')</span>' +
+              '<div class="sbe-pw-row">' +
+                '<input type="text" id="' + pwId + '" value="' + escapeHtml(initialPw) + '" autocomplete="off" spellcheck="false">' +
+                '<button type="button" class="btn btn--ghost btn--sm" id="' + pwId + '-regen">Regenerate</button>' +
+              '</div>' +
+            '</label>' +
+            '<p class="sbe-modal-note">The Geotab API requires a non-null password when switching a user back to Basic. The same temp password is applied to every SAML→Basic user in this batch — share it securely, or have each user use the standard password-reset flow afterward.</p>' +
+          '</div>'
+        : '<p class="sbe-modal-note">No selected users are on SAML — nothing requires a password.</p>') +
       '<p class="sbe-modal-note">Edits are staged — nothing is sent to Geotab until you click <strong>Commit</strong>.</p>';
     openModal('Revert ' + ui.selected.size + ' users to Basic', body, () => {
+      const pwInput = $(pwId);
+      const pw = pwInput ? pwInput.value : '';
+      if (needPw > 0 && (!pw || pw.length < 8)) {
+        showToast({ kind: 'error', message: 'Temporary password must be at least 8 characters.' });
+        return false;
+      }
       let n = 0;
       ui.selected.forEach((id) => {
         const u = ui.users.find((x) => x.id === id);
@@ -814,8 +896,13 @@ geotab.addin.samlBulkEditor = function () {
         const patch = ui.edited.get(id) || {};
         const origAuth = u.userAuthenticationType || 'BasicAuthentication';
         const origCertId = u.issuerCertificate && u.issuerCertificate.id;
-        if (origAuth !== 'BasicAuthentication') patch.userAuthenticationType = 'BasicAuthentication';
-        else delete patch.userAuthenticationType;
+        if (origAuth !== 'BasicAuthentication') {
+          patch.userAuthenticationType = 'BasicAuthentication';
+          patch.__password = pw;
+        } else {
+          delete patch.userAuthenticationType;
+          delete patch.__password;
+        }
         if (origCertId) patch.issuerCertificate = null;
         else delete patch.issuerCertificate;
         if (Object.keys(patch).length) { ui.edited.set(id, patch); n++; }
@@ -823,6 +910,12 @@ geotab.addin.samlBulkEditor = function () {
       });
       render();
       showToast({ kind: 'success', message: 'Staged Basic revert on ' + n + ' user' + (n === 1 ? '' : 's') });
+    });
+    // Wire the Regenerate button (added to the modal body after openModal()).
+    const regen = $(pwId + '-regen');
+    if (regen) regen.addEventListener('click', () => {
+      const inp = $(pwId);
+      if (inp) inp.value = generateTempPassword();
     });
   }
   function openRowEdit(id) {
@@ -836,6 +929,7 @@ geotab.addin.samlBulkEditor = function () {
         .map((c) => '<option value="' + escapeHtml(c.id) +
           (c.id === cur.certId ? '" selected>' : '">') + escapeHtml(c.name || c.subject || c.id) + '</option>')
         .join('');
+    const origAuth = u.userAuthenticationType || 'BasicAuthentication';
     const body =
       '<p><strong>' + escapeHtml(u.name) + '</strong></p>' +
       '<label class="addin-field"><span>Authentication type</span>' +
@@ -845,22 +939,54 @@ geotab.addin.samlBulkEditor = function () {
       '</label>' +
       '<label class="addin-field"><span>SAML certificate</span>' +
         '<select id="sbe-row-cert">' + certOpts + '</select>' +
-      '</label>';
+      '</label>' +
+      // Password field is only meaningful when transitioning SAML→Basic.
+      // Always render but hide unless the auth select transitions there.
+      '<div id="sbe-row-pw-block" class="sbe-pw-block"' +
+        (origAuth === 'SAML' && cur.authType === 'BasicAuthentication' ? '' : ' hidden') + '>' +
+        '<label class="addin-field"><span>Temporary password</span>' +
+          '<div class="sbe-pw-row">' +
+            '<input type="text" id="sbe-row-pw" value="' + escapeHtml(generateTempPassword()) + '" autocomplete="off" spellcheck="false">' +
+            '<button type="button" class="btn btn--ghost btn--sm" id="sbe-row-pw-regen">Regenerate</button>' +
+          '</div>' +
+        '</label>' +
+        '<p class="sbe-modal-note">The Geotab API requires a non-null password when switching a user back to Basic.</p>' +
+      '</div>';
     openModal('Edit ' + (u.name || 'user'), body, () => {
       const auth = $('sbe-row-auth').value;
       const certId = $('sbe-row-cert').value || null;
       const patch = {};
-      const origAuth = u.userAuthenticationType || 'BasicAuthentication';
       const origCertId = u.issuerCertificate && u.issuerCertificate.id;
       if (auth !== origAuth) patch.userAuthenticationType = auth;
       if (auth === 'BasicAuthentication') {
         if (origCertId) patch.issuerCertificate = null;
+        if (origAuth === 'SAML') {
+          const pw = ($('sbe-row-pw') || {}).value || '';
+          if (!pw || pw.length < 8) {
+            showToast({ kind: 'error', message: 'Temporary password must be at least 8 characters.' });
+            return false;
+          }
+          patch.__password = pw;
+        }
       } else {
         if (certId !== origCertId) patch.issuerCertificate = certId ? { id: certId, isRoot: false } : null;
       }
       if (Object.keys(patch).length === 0) ui.edited.delete(id);
       else ui.edited.set(id, patch);
       render();
+    });
+    // Wire post-open handlers: regen button + show/hide password block as
+    // the user toggles the auth select.
+    const regen = $('sbe-row-pw-regen');
+    if (regen) regen.addEventListener('click', () => {
+      const inp = $('sbe-row-pw'); if (inp) inp.value = generateTempPassword();
+    });
+    const sel = $('sbe-row-auth');
+    if (sel) sel.addEventListener('change', () => {
+      const block = $('sbe-row-pw-block');
+      if (!block) return;
+      const toBasic = sel.value === 'BasicAuthentication' && origAuth === 'SAML';
+      block.hidden = !toBasic;
     });
   }
 
@@ -873,6 +999,30 @@ geotab.addin.samlBulkEditor = function () {
   function saveEdits() {
     if (ui.edited.size === 0) return;
     const ids = Array.from(ui.edited.keys());
+    // Pre-flight: every SAML→Basic edit must carry a temp password (the
+    // Geotab API rejects Set User without entity.password — the password
+    // field is never returned by Get). The modal flows enforce this for
+    // their input paths; this is the last-line defence for any patch that
+    // slipped through (e.g. a future entry point that forgot to capture).
+    const missingPw = [];
+    ids.forEach((id) => {
+      const u = ui.users.find((x) => x.id === id);
+      const patch = ui.edited.get(id) || {};
+      const origAuth = (u && u.userAuthenticationType) || 'BasicAuthentication';
+      const targetAuth = patch.userAuthenticationType != null ? patch.userAuthenticationType : origAuth;
+      if (origAuth === 'SAML' && targetAuth === 'BasicAuthentication' && !patch.__password) {
+        missingPw.push(u ? (u.name || id) : id);
+      }
+    });
+    if (missingPw.length) {
+      setStatus('Save blocked: ' + missingPw.length + ' SAML→Basic edit(s) need a temp password.', 'error');
+      showToast({
+        kind: 'error',
+        message: missingPw.length + ' user(s) need a temp password — open Edit… or use bulk Revert to Basic.'
+      });
+      console.warn('[samlBulkEditor] missing temp password for:', missingPw);
+      return;
+    }
     if (!confirm('Commit ' + ids.length + ' edit' + (ids.length === 1 ? '' : 's') + ' to Geotab? This cannot be undone via this add-in.')) return;
     setStatus('Saving…');
     const myGen = ui.opGen;
@@ -885,7 +1035,7 @@ geotab.addin.samlBulkEditor = function () {
         if (isStale(myGen)) return;
         const setCalls = [];
         const setIndexToUserId = [];
-        const fetchErrors = [];
+        const fetchErrors = []; // [{id, err}] — Get failed or patch was invalid
         ids.forEach((id, i) => {
           const res = getResults[i];
           if (!res || res.__cancelled) return;
@@ -896,9 +1046,8 @@ geotab.addin.samlBulkEditor = function () {
           const fresh = res[0];
           const patch = ui.edited.get(id) || {};
           // Whitelist the mutable fields we own; do NOT spread the whole
-          // patch object — it could only contain keys from EDITABLE_FIELDS
-          // by our own discipline, but be defensive in case future code
-          // stashes UI-state there.
+          // patch object — __password is UI-only and must be moved into
+          // entity.password, never sent as a top-level patch key.
           if ('userAuthenticationType' in patch) {
             const v = patch.userAuthenticationType;
             if (AUTH_TYPES.indexOf(v) === -1) {
@@ -919,12 +1068,25 @@ geotab.addin.samlBulkEditor = function () {
             fetchErrors.push({ id, err: 'SAML auth requires a certificate' });
             return;
           }
+          // Apply the temp password when the user is switching back to (or
+          // staying on) Basic and we captured one. Geotab requires the
+          // password to be non-null on every Set targeting a Basic user
+          // whose stored password is unset (which is true after a SAML
+          // round-trip — the SAML user has no Basic password).
+          if (fresh.userAuthenticationType === 'BasicAuthentication' && patch.__password) {
+            fresh.password = patch.__password;
+          }
           setCalls.push(['Set', { typeName: 'User', entity: fresh }]);
           setIndexToUserId.push(id);
         });
+        // Mark patches whose pre-flight Get / validation failed so the user
+        // sees them flagged in the pill count rather than silently dropped.
+        // We keep them in ui.edited so the user can fix and retry.
+        fetchErrors.forEach((e) => console.warn('[samlBulkEditor] pre-flight', e));
         if (!setCalls.length) {
-          setStatus('Nothing to save: ' + fetchErrors.length + ' user(s) failed pre-flight.', 'error');
-          fetchErrors.forEach((e) => console.warn('[samlBulkEditor]', e));
+          setStatus('Nothing to save: ' + fetchErrors.length + ' user(s) failed pre-flight. See console.', 'error');
+          showToast({ kind: 'error', message: fetchErrors.length + ' pre-flight failure(s). Edits kept.' });
+          render(); // refresh pill / tiles
           return;
         }
         // Phase 2: bulk Set. Sequential, chunked, throttled.
@@ -939,28 +1101,72 @@ geotab.addin.samlBulkEditor = function () {
               if (r.__error) errors.push({ id, err: errMsg(r.__error) });
               else succeededIds.push(id);
             });
+            // Strip only the patches that actually succeeded. Failed edits
+            // (and pre-flight failures) stay in ui.edited so the pill keeps
+            // showing them and the user can fix / retry. This is the bug
+            // the v1.0.0 release had — loadAll() was always called, which
+            // unconditionally cleared ui.edited and wiped failed retries.
             succeededIds.forEach((id) => ui.edited.delete(id));
             const totalErr = errors.length + fetchErrors.length;
             const okMsg = 'Committed ' + succeededIds.length + ' edit' + (succeededIds.length === 1 ? '' : 's');
             if (totalErr === 0) {
               setStatus(okMsg + '. Refreshing…', 'success');
               showToast({ kind: 'success', message: okMsg });
+              // Full reload only on full success — picks up new `version`s.
+              // loadAll() clears ui.edited, which is fine here (nothing left).
+              loadAll();
             } else {
-              setStatus(okMsg + ' · ' + totalErr + ' failed. See console.', 'error');
-              showToast({ kind: 'error', message: totalErr + ' edit(s) failed' });
+              setStatus(okMsg + ' · ' + totalErr + ' failed. Edits kept — see console.', 'error');
+              showToast({ kind: 'error', message: totalErr + ' edit(s) failed — kept staged for retry.' });
               errors.concat(fetchErrors).forEach((e) => console.error('[samlBulkEditor] save error', e));
+              // Refresh ONLY the succeeded users in-place so their server
+              // version updates, without nuking the pending-edit map. The
+              // surviving entries in ui.edited still point at the original
+              // users[] entries, which is what we want for retry.
+              if (succeededIds.length) {
+                refreshUsersById(succeededIds, myGen).finally(() => { render(); });
+              } else {
+                render();
+              }
             }
-            // Reload to pick up the new server state (incl. new version).
-            loadAll();
           })
           .catch((err) => {
             if (isStale(myGen) || isCancelled(err)) return;
-            setStatus('Save failed: ' + errMsg(err), 'error');
+            // Total transport failure — nothing committed. Keep all edits.
+            setStatus('Save failed: ' + errMsg(err) + '. Edits kept.', 'error');
+            showToast({ kind: 'error', message: 'Save failed — edits kept staged.' });
+            render();
           });
       })
       .catch((err) => {
         if (isStale(myGen) || isCancelled(err)) return;
-        setStatus('Pre-flight Get failed: ' + errMsg(err), 'error');
+        setStatus('Pre-flight Get failed: ' + errMsg(err) + '. Edits kept.', 'error');
+        showToast({ kind: 'error', message: 'Pre-flight Get failed — edits kept staged.' });
+        render();
+      });
+  }
+
+  // Refresh a specific subset of User entities in place. Used after a
+  // partial-success save so we pick up the new server `version` for the
+  // users we successfully wrote, without disturbing the rest of ui.users
+  // or ui.edited.
+  function refreshUsersById(ids, gen) {
+    if (!ids || !ids.length) return Promise.resolve();
+    const calls = ids.map((id) => ['Get', { typeName: 'User', search: { id } }]);
+    return apiMultiCall(calls, { gen, label: 'Refreshing saved users' })
+      .then((results) => {
+        if (isStale(gen)) return;
+        ids.forEach((id, i) => {
+          const r = results[i];
+          if (!r || r.__cancelled || r.__error || !Array.isArray(r) || !r.length) return;
+          const fresh = r[0];
+          const idx = ui.users.findIndex((u) => u.id === id);
+          if (idx >= 0) ui.users[idx] = fresh;
+        });
+      })
+      .catch((err) => {
+        if (isStale(gen) || isCancelled(err)) return;
+        console.warn('[samlBulkEditor] post-save refresh failed', err);
       });
   }
 
