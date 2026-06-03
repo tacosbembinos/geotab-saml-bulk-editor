@@ -470,11 +470,18 @@ geotab.addin.samlBulkEditor = function () {
       lastName:  u.lastName  || '',
       authType:  authType || 'BasicAuthentication',
       certId:    certId,
-      certName:  cert ? (cert.name || cert.subject || cert.id) : (certId ? '(unknown ' + certId.slice(0, 8) + '…)' : ''),
+      certName:  cert ? certLabel(cert) : (certId ? '(unknown ' + certId.slice(0, 8) + '…)' : ''),
       lastAccess: u.lastAccessDate || u.lastLogin || '',
       active:    isActive(u),
       version:   u.version
     };
+  }
+  // Human-readable label for a Certificate entity. Falls back to the
+  // X.509 issuer DN before the Geotab object id — the opaque guid is
+  // useless to the admin choosing which cert to assign.
+  function certLabel(c) {
+    if (!c) return '';
+    return c.name || c.subject || c.issuer || c.id;
   }
   function isActive(u) {
     if (!u) return false;
@@ -560,7 +567,7 @@ geotab.addin.samlBulkEditor = function () {
         ? (d.certName || '(no certificate)')
         : '—';
       if (!certChanged) return escapeHtml(display);
-      const wasName = origCertId ? (ui.certById.get(origCertId) ? (ui.certById.get(origCertId).name || origCertId) : origCertId) : '(none)';
+      const wasName = origCertId ? (ui.certById.get(origCertId) ? certLabel(ui.certById.get(origCertId)) : origCertId) : '(none)';
       return '<span class="cell-edit" title="was: ' + escapeHtml(wasName) + '  →  now: ' + escapeHtml(display) + '">' +
                escapeHtml(display) +
                '<span class="cell-edit__marker" aria-hidden="true">✎</span>' +
@@ -670,11 +677,11 @@ geotab.addin.samlBulkEditor = function () {
     while (sel.options.length > 2) sel.remove(2);
     ui.certs
       .slice()
-      .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
+      .sort((a, b) => certLabel(a).localeCompare(certLabel(b)))
       .forEach((c) => {
         const opt = document.createElement('option');
         opt.value = c.id;
-        opt.textContent = c.name || c.subject || c.id;
+        opt.textContent = certLabel(c);
         sel.appendChild(opt);
       });
   }
@@ -689,8 +696,8 @@ geotab.addin.samlBulkEditor = function () {
     certId:   { kind: 'select', options: () => ([{ id: '', label: '(none)' }].concat(
       ui.certs
         .slice()
-        .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
-        .map((c) => ({ id: c.id, label: c.name || c.subject || c.id }))
+        .sort((a, b) => certLabel(a).localeCompare(certLabel(b)))
+        .map((c) => ({ id: c.id, label: certLabel(c) }))
     )) }
   };
   function cellEditorHtml(field, cur) {
@@ -871,8 +878,8 @@ geotab.addin.samlBulkEditor = function () {
   function openBulkSaml() {
     const optionsHtml = ui.certs
       .slice()
-      .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
-      .map((c) => '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name || c.subject || c.id) + '</option>')
+      .sort((a, b) => certLabel(a).localeCompare(certLabel(b)))
+      .map((c) => '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(certLabel(c)) + '</option>')
       .join('');
     if (!optionsHtml) {
       showToast({ kind: 'error', message: 'No SAML certificates available. Install one in Geotab first.' });
@@ -976,9 +983,9 @@ geotab.addin.samlBulkEditor = function () {
     const certOpts = '<option value="">(none)</option>' +
       ui.certs
         .slice()
-        .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
+        .sort((a, b) => certLabel(a).localeCompare(certLabel(b)))
         .map((c) => '<option value="' + escapeHtml(c.id) +
-          (c.id === cur.certId ? '" selected>' : '">') + escapeHtml(c.name || c.subject || c.id) + '</option>')
+          (c.id === cur.certId ? '" selected>' : '">') + escapeHtml(certLabel(c)) + '</option>')
         .join('');
     const origAuth = u.userAuthenticationType || 'BasicAuthentication';
     const body =
